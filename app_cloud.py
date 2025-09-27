@@ -1,20 +1,10 @@
 import os
-import io
 import base64
 from flask import Flask, request, jsonify, render_template, send_file
 from werkzeug.utils import secure_filename
 from PIL import Image
-import numpy as np
 from rembg import remove, new_session
 import logging
-
-# Try to import OpenCV, but handle gracefully if it fails
-try:
-    import cv2
-    OPENCV_AVAILABLE = True
-except ImportError:
-    OPENCV_AVAILABLE = False
-    print("Warning: OpenCV not available, using rembg-only mode")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -53,50 +43,6 @@ def remove_background_rembg(image_path, output_path):
         logger.error(f"Error in rembg: {str(e)}")
         return False
 
-def remove_background_opencv(image_path, output_path):
-    """Remove background using OpenCV (fallback method)"""
-    if not OPENCV_AVAILABLE:
-        logger.warning("OpenCV not available, skipping fallback method")
-        return False
-        
-    try:
-        # Read the image
-        img = cv2.imread(image_path)
-        if img is None:
-            return False
-        
-        # Convert to grayscale
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        
-        # Apply Gaussian blur
-        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-        
-        # Apply threshold to create a mask
-        _, mask = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        
-        # Create 3-channel mask
-        mask_3channel = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
-        
-        # Apply morphological operations to clean up the mask
-        kernel = np.ones((3,3), np.uint8)
-        mask_3channel = cv2.morphologyEx(mask_3channel, cv2.MORPH_CLOSE, kernel)
-        mask_3channel = cv2.morphologyEx(mask_3channel, cv2.MORPH_OPEN, kernel)
-        
-        # Create transparent background
-        result = img.copy()
-        result = cv2.cvtColor(result, cv2.COLOR_BGR2BGRA)
-        
-        # Apply mask to alpha channel
-        result[:, :, 3] = mask
-        
-        # Save as PNG to preserve transparency
-        cv2.imwrite(output_path, result)
-        return True
-        
-    except Exception as e:
-        logger.error(f"Error in OpenCV method: {str(e)}")
-        return False
-
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -116,6 +62,7 @@ def upload_file():
         
         # Save uploaded file
         filename = secure_filename(file.filename)
+        import time
         timestamp = str(int(time.time()))
         unique_filename = f"{timestamp}_{filename}"
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
@@ -125,11 +72,8 @@ def upload_file():
         output_filename = f"removed_bg_{unique_filename}"
         output_path = os.path.join(app.config['OUTPUT_FOLDER'], output_filename)
         
-        # Try rembg first, fallback to OpenCV
+        # Use rembg for background removal
         success = remove_background_rembg(filepath, output_path)
-        if not success:
-            logger.info("Rembg failed, trying OpenCV method")
-            success = remove_background_opencv(filepath, output_path)
         
         if success:
             # Convert output to base64 for preview
@@ -182,6 +126,16 @@ def cleanup_file(filename):
     except Exception as e:
         logger.error(f"Cleanup error: {str(e)}")
         return jsonify({'error': 'Cleanup failed'}), 500
+
+@app.route('/health')
+def health_check():
+    """Health check endpoint for deployment platforms"""
+    return jsonify({
+        'status': 'healthy',
+        'message': 'Background Remover App is running',
+        'opencv_available': False,
+        'rembg_available': True
+    })
 
 if __name__ == '__main__':
     import time

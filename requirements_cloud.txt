@@ -1,6 +1,5 @@
 Flask>=2.3.0
 rembg
-opencv-python-headless
 Pillow
 numpy
 werkzeug
