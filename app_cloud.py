@@ -1,5 +1,6 @@
 import os
 import base64
+import time
 from flask import Flask, request, jsonify, render_template, send_file
 from werkzeug.utils import secure_filename
 from PIL import Image
@@ -62,7 +63,6 @@ def upload_file():
         
         # Save uploaded file
         filename = secure_filename(file.filename)
-        import time
         timestamp = str(int(time.time()))
         unique_filename = f"{timestamp}_{filename}"
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
@@ -138,6 +138,5 @@ def health_check():
     })
 
 if __name__ == '__main__':
-    import time
     port = int(os.environ.get('PORT', 5000))
     app.run(debug=False, host='0.0.0.0', port=port)
