@@ -16,6 +16,9 @@ except ImportError:
     OPENCV_AVAILABLE = False
     print("Warning: OpenCV not available, using rembg-only mode")
 
+# Import time module
+import time
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
