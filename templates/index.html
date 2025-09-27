@@ -284,6 +284,12 @@
 
         <div class="error" id="error"></div>
         <div class="success" id="success"></div>
+        
+        <div class="retry-container" id="retryContainer" style="display: none; margin: 20px 0; text-align: center;">
+            <button class="btn btn-secondary" id="retryBtn">
+                <i class="fas fa-redo"></i> Try Again
+            </button>
+        </div>
 
         <div class="preview-container" id="previewContainer">
             <div class="preview-images">
@@ -346,8 +352,11 @@
         const processedImage = document.getElementById('processedImage');
         const downloadBtn = document.getElementById('downloadBtn');
         const newImageBtn = document.getElementById('newImageBtn');
+        const retryContainer = document.getElementById('retryContainer');
+        const retryBtn = document.getElementById('retryBtn');
 
         let currentFilename = '';
+        let lastUploadedFile = null;
 
         // Drag and drop functionality
         uploadArea.addEventListener('dragover', (e) => {
@@ -385,11 +394,14 @@
                 return;
             }
 
-            // Validate file size (16MB limit)
-            if (file.size > 16 * 1024 * 1024) {
-                showError('File size must be less than 16MB.');
+            // Validate file size (8MB limit for lightweight version)
+            if (file.size > 8 * 1024 * 1024) {
+                showError('File size must be less than 8MB.');
                 return;
             }
+
+            // Store the file for potential retry
+            lastUploadedFile = file;
 
             // Show original image preview
             const reader = new FileReader();
@@ -402,7 +414,7 @@
             uploadAndProcess(file);
         }
 
-        function uploadAndProcess(file) {
+        function uploadAndProcess(file, retryCount = 0) {
             const formData = new FormData();
             formData.append('file', file);
 
@@ -410,6 +422,14 @@
             hideError();
             hideSuccess();
             hidePreview();
+
+            // Update loading text for retries
+            const loadingText = document.querySelector('.loading-text');
+            if (retryCount > 0) {
+                loadingText.textContent = `Retrying... (Attempt ${retryCount + 1})`;
+            } else {
+                loadingText.textContent = 'Removing background... Please wait';
+            }
 
             fetch('/upload', {
                 method: 'POST',
@@ -423,14 +443,31 @@
                     currentFilename = data.output_filename;
                     processedImage.src = data.preview;
                     showPreview();
-                    showSuccess('Background removed successfully!');
+                    showSuccess(data.message || 'Background removed successfully!');
                 } else {
-                    showError(data.error || 'Failed to remove background');
+                    // Check if we should retry
+                    if (data.retry_suggestion && retryCount < 2) {
+                        showError(`Attempt ${retryCount + 1} failed. Retrying automatically...`);
+                        setTimeout(() => {
+                            uploadAndProcess(file, retryCount + 1);
+                        }, 2000); // Wait 2 seconds before retry
+                    } else {
+                        showError(data.error || 'Failed to remove background. Please try again.');
+                        showRetryButton();
+                    }
                 }
             })
             .catch(err => {
                 hideLoading();
-                showError('Network error. Please try again.');
+                if (retryCount < 2) {
+                    showError(`Network error. Retrying... (Attempt ${retryCount + 1})`);
+                    setTimeout(() => {
+                        uploadAndProcess(file, retryCount + 1);
+                    }, 2000);
+                } else {
+                    showError('Network error. Please check your connection and try again.');
+                    showRetryButton();
+                }
                 console.error('Error:', err);
             });
         }
@@ -469,6 +506,14 @@
             previewContainer.style.display = 'none';
         }
 
+        function showRetryButton() {
+            retryContainer.style.display = 'block';
+        }
+
+        function hideRetryButton() {
+            retryContainer.style.display = 'none';
+        }
+
         downloadBtn.addEventListener('click', () => {
             if (currentFilename) {
                 window.open(`/download/${currentFilename}`, '_blank');
@@ -479,8 +524,17 @@
             hidePreview();
             hideError();
             hideSuccess();
+            hideRetryButton();
             fileInput.value = '';
             currentFilename = '';
+            lastUploadedFile = null;
+        });
+
+        retryBtn.addEventListener('click', () => {
+            if (lastUploadedFile) {
+                hideRetryButton();
+                uploadAndProcess(lastUploadedFile);
+            }
         });
     </script>
 </body>

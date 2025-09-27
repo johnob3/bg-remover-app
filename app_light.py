@@ -57,30 +57,40 @@ def remove_background_simple(image_path, output_path):
         logger.error(f"Error in simple background removal: {str(e)}")
         return False
 
-def remove_background_rembg_light(image_path, output_path):
-    """Lightweight background removal using rembg with smaller model"""
-    try:
-        # Import rembg only when needed to save memory
-        from rembg import remove, new_session
-        
-        # Use a smaller, lighter model
-        session = new_session('u2netp')  # Smaller model than u2net
-        
-        with open(image_path, 'rb') as input_file:
-            input_data = input_file.read()
-        
-        output_data = remove(input_data, session=session)
-        
-        with open(output_path, 'wb') as output_file:
-            output_file.write(output_data)
-        
-        # Clean up session to free memory
-        del session
-        
-        return True
-    except Exception as e:
-        logger.error(f"Error in rembg: {str(e)}")
-        return False
+def remove_background_rembg_light(image_path, output_path, max_retries=3):
+    """Lightweight background removal using rembg with retry mechanism"""
+    for attempt in range(max_retries):
+        try:
+            # Import rembg only when needed to save memory
+            from rembg import remove, new_session
+            
+            # Use a smaller, lighter model
+            session = new_session('u2netp')  # Smaller model than u2net
+            
+            with open(image_path, 'rb') as input_file:
+                input_data = input_file.read()
+            
+            output_data = remove(input_data, session=session)
+            
+            with open(output_path, 'wb') as output_file:
+                output_file.write(output_data)
+            
+            # Clean up session to free memory
+            del session
+            
+            logger.info(f"Background removal successful on attempt {attempt + 1}")
+            return True
+            
+        except Exception as e:
+            logger.warning(f"Attempt {attempt + 1} failed: {str(e)}")
+            if attempt < max_retries - 1:
+                # Wait before retry (exponential backoff)
+                import time
+                time.sleep(0.5 * (2 ** attempt))
+                continue
+            else:
+                logger.error(f"All {max_retries} attempts failed")
+                return False
 
 @app.route('/')
 def index():
@@ -121,10 +131,12 @@ def upload_file():
         output_filename = f"removed_bg_{unique_filename}"
         output_path = os.path.join(app.config['OUTPUT_FOLDER'], output_filename)
         
-        # Try lightweight rembg first, fallback to simple method
+        # Try lightweight rembg first with retry mechanism
+        logger.info("Starting background removal process...")
         success = remove_background_rembg_light(filepath, output_path)
+        
         if not success:
-            logger.info("Rembg failed, trying simple method")
+            logger.info("AI method failed, trying simple fallback method")
             success = remove_background_simple(filepath, output_path)
         
         if success:
@@ -136,10 +148,12 @@ def upload_file():
             # Clean up uploaded file
             os.remove(filepath)
             
+            logger.info("Background removal completed successfully")
             return jsonify({
                 'success': True,
                 'output_filename': output_filename,
-                'preview': f"data:image/png;base64,{output_base64}"
+                'preview': f"data:image/png;base64,{output_base64}",
+                'message': 'Background removed successfully!'
             })
         else:
             # Clean up files on failure
@@ -148,7 +162,11 @@ def upload_file():
             if os.path.exists(output_path):
                 os.remove(output_path)
             
-            return jsonify({'error': 'Failed to remove background'}), 500
+            logger.error("All background removal methods failed")
+            return jsonify({
+                'error': 'Failed to remove background. Please try again with a different image or try uploading again.',
+                'retry_suggestion': True
+            }), 500
             
     except Exception as e:
         logger.error(f"Upload error: {str(e)}")
